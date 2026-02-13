@@ -61,7 +61,7 @@ classifiers = [
 
 # Required dependencies ------------------------------------------------------------------------------------------------
 dependencies = [
-    "numpy>=1.23.0",
+    "numpy>=1.23.0,<2",  # Upper bound for TensorFlow/TFLite compatibility
     "matplotlib>=3.3.0",
     "opencv-python>=4.6.0",
     "pillow>=7.1.2",
@@ -74,6 +74,7 @@ dependencies = [
     "psutil>=5.8.0", # system utilization
     "polars>=0.20.0",
     "ultralytics-thop>=2.0.18", # FLOPs computation https://github.com/ultralytics/thop
+    "edgefirst-cameraadaptor[torch]>=0.1.0", # EdgeFirst CameraAdaptor for native camera format support
 ]
 
 # Optional dependencies ------------------------------------------------------------------------------------------------

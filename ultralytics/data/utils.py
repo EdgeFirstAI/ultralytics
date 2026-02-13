@@ -428,7 +428,14 @@ def check_det_dataset(dataset: str, autodownload: bool = True) -> dict[str, Any]
         data["nc"] = len(data["names"])
 
     data["names"] = check_class_names(data["names"])
-    data["channels"] = data.get("channels", 3)  # get image channels, default to 3
+    
+    # Compute channels from cameraadaptor if present, otherwise use explicit channels or default to 3
+    cameraadaptor = data.get("cameraadaptor", "rgb")
+    if cameraadaptor != "rgb" and "channels" not in data:
+        from edgefirst.cameraadaptor import get_input_channels
+        data["channels"] = get_input_channels(cameraadaptor)
+    else:
+        data["channels"] = data.get("channels", 3)  # get image channels, default to 3
 
     # Resolve paths
     path = Path(extract_dir or data.get("path") or Path(data.get("yaml_file", "")).parent)  # dataset root

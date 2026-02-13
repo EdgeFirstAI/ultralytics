@@ -1970,6 +1970,7 @@ class Format:
         mask_overlap (bool): Whether to overlap masks.
         batch_idx (bool): Whether to keep batch indexes.
         bgr (float): The probability to return BGR images.
+        cameraadaptor (str): Camera adaptor format (rgb, bgr, rgba, bgra, yuyv).
 
     Methods:
         __call__: Format labels dictionary with image, classes, bounding boxes, and optionally masks and keypoints.
@@ -1995,6 +1996,7 @@ class Format:
         mask_overlap: bool = True,
         batch_idx: bool = True,
         bgr: float = 0.0,
+        cameraadaptor: str = "rgb",
     ):
         """Initialize the Format class with given parameters for image and instance annotation formatting.
 
@@ -2011,6 +2013,7 @@ class Format:
             mask_overlap (bool): If True, allows mask overlap.
             batch_idx (bool): If True, keeps batch indexes.
             bgr (float): Probability of returning BGR images instead of RGB.
+            cameraadaptor (str): Camera adaptor format for EdgeFirst (rgb, bgr, rgba, bgra, yuyv).
         """
         self.bbox_format = bbox_format
         self.normalize = normalize
@@ -2021,6 +2024,22 @@ class Format:
         self.mask_overlap = mask_overlap
         self.batch_idx = batch_idx  # keep the batch indexes
         self.bgr = bgr
+        self.cameraadaptor = cameraadaptor
+        
+        # Initialize camera adaptor transform if not using default BGR
+        # Ultralytics loads images based on the 'channels' setting in dataset config:
+        # - channels=3 (default): cv2.IMREAD_COLOR loads BGR
+        # - channels=1: cv2.IMREAD_GRAYSCALE loads grayscale
+        # The CameraAdaptorTransform must match the source format to the loaded channels.
+        if cameraadaptor != "bgr":
+            from edgefirst.cameraadaptor import CameraAdaptorTransform, get_input_channels
+            # Determine source format based on target cameraadaptor's input channels
+            # GREY (1 channel) -> source is "grey" (images loaded as grayscale)
+            # Others (2+ channels) -> source is "bgr" (images loaded as BGR)
+            source_format = "grey" if get_input_channels(cameraadaptor) == 1 else "bgr"
+            self.camera_transform = CameraAdaptorTransform(cameraadaptor, source_format=source_format)
+        else:
+            self.camera_transform = None
 
     def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
         """Format image annotations for object detection, instance segmentation, and pose estimation tasks.
@@ -2109,11 +2128,12 @@ class Format:
         """Format an image for YOLO from a Numpy array to a PyTorch tensor.
 
         This function performs the following operations:
-        1. Ensures the image has 3 dimensions (adds a channel dimension if needed).
-        2. Transposes the image from HWC to CHW format.
-        3. Optionally flips the color channels from RGB to BGR.
-        4. Converts the image to a contiguous array.
-        5. Converts the Numpy array to a PyTorch tensor.
+        1. Applies camera adaptor transform if configured (converts RGB to target format).
+        2. Ensures the image has 3 dimensions (adds a channel dimension if needed).
+        3. Transposes the image from HWC to CHW format.
+        4. Optionally flips the color channels from RGB to BGR.
+        5. Converts the image to a contiguous array.
+        6. Converts the Numpy array to a PyTorch tensor.
 
         Args:
             img (np.ndarray): Input image as a Numpy array with shape (H, W, C) or (H, W).
@@ -2128,10 +2148,18 @@ class Format:
             >>> print(formatted_img.shape)
             torch.Size([3, 100, 100])
         """
+        # Apply camera adaptor transform if configured (e.g., RGB -> YUYV, BGR, RGBA)
+        if self.camera_transform is not None:
+            img = self.camera_transform(img)
+        
         if len(img.shape) < 3:
             img = img[..., None]
         img = img.transpose(2, 0, 1)
-        img = np.ascontiguousarray(img[::-1] if random.uniform(0, 1) > self.bgr and img.shape[0] == 3 else img)
+        # Skip BGR flip if using camera adaptor (format already handled)
+        if self.camera_transform is None:
+            img = np.ascontiguousarray(img[::-1] if random.uniform(0, 1) > self.bgr and img.shape[0] == 3 else img)
+        else:
+            img = np.ascontiguousarray(img)
         img = torch.from_numpy(img)
         return img
 

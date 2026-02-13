@@ -73,6 +73,7 @@ from ultralytics.nn.modules import (
     YOLOESegment26,
     v10Detect,
 )
+from edgefirst.cameraadaptor.pytorch import CameraAdaptor
 from ultralytics.utils import DEFAULT_CFG_DICT, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.utils.loss import (
@@ -383,6 +384,11 @@ class DetectionModel(BaseModel):
             )
             self.yaml["backbone"][0][2] = "nn.Identity"
 
+        # Check if first layer is CameraAdaptor and adjust input channels accordingly
+        first_layer = self.yaml["backbone"][0]
+        if first_layer[2] == "CameraAdaptor":
+            ch = CameraAdaptor.compute_input_channels(first_layer[3])
+
         # Define model
         self.yaml["channels"] = ch  # save channels
         if nc and nc != self.yaml["nc"]:
@@ -663,6 +669,11 @@ class ClassificationModel(BaseModel):
             verbose (bool): Whether to display model information.
         """
         self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
+
+        # Check if first layer is CameraAdaptor and adjust input channels accordingly
+        first_layer = self.yaml["backbone"][0]
+        if first_layer[2] == "CameraAdaptor":
+            ch = CameraAdaptor.compute_input_channels(first_layer[3])
 
         # Define model
         ch = self.yaml["channels"] = self.yaml.get("channels", ch)  # input channels
@@ -1622,19 +1633,25 @@ def parse_model(d, ch, verbose=True):
         }
     )
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
-        m = (
-            getattr(torch.nn, m[3:])
-            if "nn." in m
-            else getattr(__import__("torchvision").ops, m[16:])
-            if "torchvision.ops." in m
-            else globals()[m]
-        )  # get module
+        if m == "CameraAdaptor":
+            m = CameraAdaptor
+        else:
+            m = (
+                getattr(torch.nn, m[3:])
+                if "nn." in m
+                else getattr(__import__("torchvision").ops, m[16:])
+                if "torchvision.ops." in m
+                else globals()[m]
+            )  # get module
         for j, a in enumerate(args):
             if isinstance(a, str):
                 with contextlib.suppress(ValueError):
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
-        if m in base_modules:
+        if m is CameraAdaptor:
+            # CameraAdaptor: args[0] is the adaptor format (e.g., "rgba", "bgr", "yuyv")
+            c2 = CameraAdaptor.compute_output_channels(args)
+        elif m in base_modules:
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 != nc (e.g., Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
